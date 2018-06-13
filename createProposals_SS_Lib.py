@@ -62,7 +62,7 @@ def do_parsing():
     parser.add_argument('--imagesDir', required=True, help='Folder containing input images')
     parser.add_argument('--maxSide', type=int, required=False, default=300, help='Max side of image preprocess resize')
     parser.add_argument('--outputDirCrop', type=str, required=False, help='Output dir where to put images crops')
-    parser.add_argument('--outputDirJSON', type=str, required=False, help='Output dir where to put JSON files')
+    parser.add_argument('--outputDirJson', type=str, required=False, help='Output dir where to put JSON files')
     # Over 1000 regions the crops seem to be very similar
     parser.add_argument('--maxRegions', type=int, required=False, default=1000,
                         help='Maximum number of regions to export')
@@ -96,10 +96,10 @@ def main():
             img_lbl, regions = ss.selective_search(img_resized, scale=500, sigma=0.9, min_size=10)
 
             # Proposals export in JSON for our object detection training pipeline
-            if args.outputDirJSON is not None:
+            if args.outputDirJson is not None:
 
-                if os.path.exists(args.outputDirJSON) is False:
-                    os.makedirs(args.outputDirJSON)
+                if os.path.exists(args.outputDirJson) is False:
+                    os.makedirs(args.outputDirJson)
 
                 proposals = prepareJSON(width, height, regions, maxRegions=args.maxRegions)
                 # {
@@ -112,7 +112,7 @@ def main():
                 #        "y": 0.0
                 #    },
                 imageProposal = ImageProposals(imageName=imageNameWithoutExtension, proposals=proposals)
-                with open(os.path.join(args.outputDirJSON, imageNameWithoutExtension + ".json"), 'w') as outfile:
+                with open(os.path.join(args.outputDirJson, imageNameWithoutExtension + ".json"), 'w') as outfile:
                     json.dump(imageProposal, outfile, default=lambda o: o.__dict__, indent=4, sort_keys=True)
 
             # Proposals crops export as images
