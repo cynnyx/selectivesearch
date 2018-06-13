@@ -18,7 +18,8 @@ def do_parsing():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         description='Script to export selective search proposals')
-    parser.add_argument('--imagesDir', type=str, required=True, help='Folder containing input images')
+    parser.add_argument('--imagesDir', type=str, required=True,
+                        help='Folder containing input images, it can includes one level of subdirectories')
     parser.add_argument('--maxSide', type=int, required=False, default=300, help='Max side of image preprocess resize')
     parser.add_argument('--quality', action="store_true", help='More quality (recall), but slower')
     # Index format, single file
@@ -48,7 +49,7 @@ def writeIndexFile(imageRelPath, outputIndexFilePath, rects_dict):
         outputIndexFile.writelines([imageRelPath, "\t", rects_dict_string, "\n"])
 
 
-def prepareJSON(imageRelPath, rects_dict, outputDirJson):
+def prepareJSON(imageFileName, subdir, rects_dict, outputDirJson):
 
     proposals = []
 
@@ -65,13 +66,13 @@ def prepareJSON(imageRelPath, rects_dict, outputDirJson):
         proposal = Proposal(relX, relY, relW, relH)
         proposals.append(proposal)
 
-    imageNameWithoutExtension = imageRelPath[:imageFile.rindex('.')]
+    imageNameWithoutExtension = imageFileName[:imageFileName.rindex('.')]
     imageProposal = ImageProposals(imageName=imageNameWithoutExtension, proposals=proposals)
-    with open(os.path.join(outputDirJson, imageNameWithoutExtension + ".json"), 'w') as outfile:
+    with open(os.path.join(outputDirJson, subdir, imageNameWithoutExtension + ".json"), 'w') as outfile:
         json.dump(imageProposal, outfile, default=lambda o: o.__dict__, indent=4, sort_keys=True)
 
 
-def exportCrop(imageRelPath, image, rects_dict, outputDirCrop):
+def exportCrop(imageFileName, subdir, image, rects_dict, outputDirCrop):
 
     for index, rect_dict in tqdm(enumerate(rects_dict), desc="Crop"):
 
@@ -81,8 +82,9 @@ def exportCrop(imageRelPath, image, rects_dict, outputDirCrop):
         h = rect_dict["height"]
 
         crop = image[y:y+h, x:x+w]
-        imageNameWithoutExtension = imageRelPath[:imageFile.rindex('.')]
-        skimage.io.imsave(os.path.join(outputDirCrop, imageNameWithoutExtension + "_" + str(index+1) + ".jpg"), crop)
+        imageNameWithoutExtension = imageFileName[:imageFileName.rindex('.')]
+        cv2.imwrite(os.path.join(outputDirCrop, subdir, imageNameWithoutExtension + "_" + str(index+1) + ".jpg"),
+                    crop)
 
 
 if __name__ == '__main__':
@@ -107,110 +109,120 @@ if __name__ == '__main__':
     if args.outputDirCrop:
         os.makedirs(args.outputDirCrop, exist_ok=False)
 
-    # TODO: Iterate over one level of directories
-    subset = ""
+    # Retrieve subdirectories
+    subdirs = next(os.walk(args.imagesDir))[1]
+    if len(subdirs) == 0:
+        subdirs = [""]
 
-    #Files to analyze, ordered by name
+    # Files to analyze, ordered by name
     imgFormats = ["jpg", "png", "jpeg"]
-    for imgFormat in imgFormats:
-        files = sorted(glob.glob(args.imagesDir + "/*." + imgFormat), key=lambda s: s.lower())
-        for imageFile in tqdm(files, unit="Image"):
 
-            imageNameWithoutExtension = imageFile[imageFile.rindex('/') + 1:imageFile.rindex('.')]
+    for subdir in tqdm(subdirs, desc="subdir"):
 
-            # HWC image loading
-            image = cv2.imread(imageFile)
-            width = image.shape[1]
-            height = image.shape[0]
+        if args.outputDirCrop:
+            os.makedirs(os.path.join(args.outputDirCrop, subdir), exist_ok=True)
 
-            # resize image, REALLY REALLY IMPORTANT FOR PERFORMANCES
-            image_resized = resizeImage(image, width=width, height=height, maxSide=args.maxSide)
+        if args.outputDirJson:
+            os.makedirs(os.path.join(args.outputDirJson, subdir), exist_ok=True)
 
-            resized_width = image_resized.shape[1]
-            resized_height = image_resized.shape[0]
+        for imgFormat in imgFormats:
+            files = sorted(glob.glob(os.path.join(args.imagesDir, subdir) + "/*." + imgFormat), key=lambda s: s.lower())
+            for imageFile in tqdm(files, desc=("Image in " + imgFormat + " format")):
 
-            # set input image on which we will run segmentation
-            ss.setBaseImage(image_resized)
+                imageNameWithoutExtension = imageFile[imageFile.rindex('/') + 1:imageFile.rindex('.')]
 
-            # Quality switch must executed for each image
-            if args.quality:
-                # Switch to high recall but slow Selective Search method
-                ss.switchToSelectiveSearchQuality()
-            else:
-                # Switch to fast but low recall Selective Search method
-                ss.switchToSelectiveSearchFast()
+                # HWC image loading
+                image = cv2.imread(imageFile)
+                width = image.shape[1]
+                height = image.shape[0]
 
-            # run selective search segmentation on input image
-            regions = ss.process()
-            print('Total Number of Region Proposals: {}'.format(len(regions)))
+                # resize image, REALLY REALLY IMPORTANT FOR PERFORMANCES
+                image_resized = resizeImage(image, width=width, height=height, maxSide=args.maxSide)
 
-            rects_dict_rel = []
-            rects_dict_abs = []
+                resized_width = image_resized.shape[1]
+                resized_height = image_resized.shape[0]
 
-            acceptable_bounding_boxes = 0
+                # set input image on which we will run segmentation
+                ss.setBaseImage(image_resized)
 
-            for boundingBox in regions:
+                # Quality switch must executed for each image
+                if args.quality:
+                    # Switch to high recall but slow Selective Search method
+                    ss.switchToSelectiveSearchQuality()
+                else:
+                    # Switch to fast but low recall Selective Search method
+                    ss.switchToSelectiveSearchFast()
 
-                x, y, w, h = boundingBox
+                # run selective search segmentation on input image
+                regions = ss.process()
+                print('Total Number of Region Proposals: {}'.format(len(regions)))
 
-                # Check size on resized image
-                if w >= args.minSize and h >= args.minSize:
+                rects_dict_rel = []
+                rects_dict_abs = []
 
-                    # Pixels are in range [0, width] and [0, height].
-                    # Don't know why last value is added, instead of [0, width - 1] and [0, height - 1]
-                    XMinR = float(x) / float(resized_width)
-                    YMinR = float(y) / float(resized_height)
-                    widthR = float(w) / float(resized_width)
-                    heightR = float(h) / float(resized_height)
+                acceptable_bounding_boxes = 0
 
-                    # Retrieve absolute positions on the original image
-                    x_original = int(x * width / resized_width)
-                    y_original = int(y * height / resized_height)
-                    w_original = int(w * width / resized_width)
-                    h_original = int(h * height / resized_height)
+                for boundingBox in regions:
 
-                    this_rect_dict_rel = dict()
-                    this_rect_dict_rel["x_rel"] = XMinR
-                    this_rect_dict_rel["y_rel"] = YMinR
-                    this_rect_dict_rel["width_rel"] = widthR
-                    this_rect_dict_rel["height_rel"] = heightR
+                    x, y, w, h = boundingBox
 
-                    rects_dict_rel.append(this_rect_dict_rel)
+                    # Check size on resized image
+                    if w >= args.minSize and h >= args.minSize:
 
-                    this_rect_dict_abs = dict()
-                    this_rect_dict_abs["x"] = x_original
-                    this_rect_dict_abs["y"] = y_original
-                    this_rect_dict_abs["width"] = w_original
-                    this_rect_dict_abs["height"] = h_original
+                        # Pixels are in range [0, width] and [0, height].
+                        # Don't know why last value is added, instead of [0, width - 1] and [0, height - 1]
+                        XMinR = float(x) / float(resized_width)
+                        YMinR = float(y) / float(resized_height)
+                        widthR = float(w) / float(resized_width)
+                        heightR = float(h) / float(resized_height)
 
-                    rects_dict_abs.append(this_rect_dict_abs)
+                        # Retrieve absolute positions on the original image
+                        x_original = int(x * width / resized_width)
+                        y_original = int(y * height / resized_height)
+                        w_original = int(w * width / resized_width)
+                        h_original = int(h * height / resized_height)
 
-                    acceptable_bounding_boxes += 1
-                    if acceptable_bounding_boxes >= args.maxRegions:
-                        break
+                        this_rect_dict_rel = dict()
+                        this_rect_dict_rel["x_rel"] = XMinR
+                        this_rect_dict_rel["y_rel"] = YMinR
+                        this_rect_dict_rel["width_rel"] = widthR
+                        this_rect_dict_rel["height_rel"] = heightR
 
-            if args.outputIndexFile:
-                rects_dict = rects_dict_rel if args.relativeCoordIndexFile else rects_dict_abs
-                writeIndexFile(imageRelPath=os.path.join(subset, os.path.basename(imageFile)),
-                               outputIndexFilePath=args.outputIndexFile, rects_dict=rects_dict)
+                        rects_dict_rel.append(this_rect_dict_rel)
 
-            # Proposals export in JSON for our object detection training pipeline
-            if args.outputDirJson:
-                # {
-                # "image": "000001",
-                # "proposals": [
-                #    {
-                #        "height": 1.0,
-                #        "width": 0.725212454795837,
-                #        "x": 0.0906515568494797,
-                #        "y": 0.0
-                #    },
-                prepareJSON(imageRelPath=os.path.join(subset, os.path.basename(imageFile)),
-                            rects_dict=rects_dict_rel, outputDirJson=args.outputDirJson)
+                        this_rect_dict_abs = dict()
+                        this_rect_dict_abs["x"] = x_original
+                        this_rect_dict_abs["y"] = y_original
+                        this_rect_dict_abs["width"] = w_original
+                        this_rect_dict_abs["height"] = h_original
 
-            # Proposals crops export as images
-            if args.outputDirCrop:
+                        rects_dict_abs.append(this_rect_dict_abs)
 
-                exportCrop(imageRelPath=os.path.join(subset, os.path.basename(imageFile)),
-                           image=image, rects_dict=rects_dict_abs,
-                           outputDirCrop=args.outputDirCrop)
+                        acceptable_bounding_boxes += 1
+                        if acceptable_bounding_boxes >= args.maxRegions:
+                            break
+
+                if args.outputIndexFile:
+                    rects_dict = rects_dict_rel if args.relativeCoordIndexFile else rects_dict_abs
+                    writeIndexFile(imageRelPath=os.path.join(subdir, os.path.basename(imageFile)),
+                                   outputIndexFilePath=args.outputIndexFile, rects_dict=rects_dict)
+
+                # Proposals export in JSON for our object detection training pipeline, subdirectories tree is maintained
+                if args.outputDirJson:
+                    # {
+                    # "image": "000001",
+                    # "proposals": [
+                    #    {
+                    #        "height": 1.0,
+                    #        "width": 0.725212454795837,
+                    #        "x": 0.0906515568494797,
+                    #        "y": 0.0
+                    #    },
+                    prepareJSON(imageFileName=os.path.basename(imageFile),
+                                subdir=subdir, rects_dict=rects_dict_rel, outputDirJson=args.outputDirJson)
+
+                # Proposals crops export as images, subdirectories tree is maintained
+                if args.outputDirCrop:
+                    exportCrop(imageFileName=os.path.basename(imageFile),
+                               subdir=subdir, image=image, rects_dict=rects_dict_abs,
+                               outputDirCrop=args.outputDirCrop)
