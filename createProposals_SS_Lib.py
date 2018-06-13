@@ -9,7 +9,7 @@ from tqdm import tqdm
 import sys
 import os
 
-from common import ImageProposals, prepareJSON, exportCrop
+from common import ImageProposals, prepareJSON, exportCrop, resizeImage
 
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), ".."))
 from proposals.Proposal import Proposal
@@ -20,6 +20,7 @@ def do_parsing():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         description='Script to export selective search proposals')
     parser.add_argument('--imagesDir', required=True, help='Folder containing input images')
+    parser.add_argument('--maxSide', type=int, required=False, default=300, help='Max side of image preprocess resize')
     parser.add_argument('--outputDirCrop', type=str, required=False, help='Output dir where to put images crops')
     parser.add_argument('--outputDirJSON', type=str, required=False, help='Output dir where to put JSON files')
     # Over 1000 regions the crops seem to be very similar
@@ -36,7 +37,7 @@ def main():
     print(args)
 
     #Files to analyze, ordered by name
-    imgFormats = ["jpg", "png"]
+    imgFormats = ["jpg", "png", "jpeg"]
     for imgFormat in imgFormats:
         files = sorted(glob.glob(args.imagesDir + "/*." + imgFormat), key=lambda s: s.lower())
         for imageFile in tqdm(files, unit="Image"):
@@ -48,8 +49,11 @@ def main():
             width = img.shape[1]
             height = img.shape[0]
 
+            # resize image, REALLY REALLY IMPORTANT FOR PERFORMANCES
+            img_resized = resizeImage(img, width=width, height=height, maxSide=args.maxSide)
+
             # region x, y, w, h
-            img_lbl, regions = ss.selective_search(img, scale=500, sigma=0.9, min_size=10)
+            img_lbl, regions = ss.selective_search(img_resized, scale=500, sigma=0.9, min_size=10)
 
             # Proposals export in JSON for our object detection training pipeline
             if args.outputDirJSON is not None:

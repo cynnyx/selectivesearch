@@ -1,32 +1,36 @@
 import cv2
 import argparse
 import glob
-from tqdm import tqdm
-
-import skimage.data
-import skimage.io
 import json
-
 import sys
 import os
+
+from tqdm import tqdm
+import numpy as np
 
 from common import ImageProposals, prepareJSON, exportCrop
 
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), ".."))
 from proposals.Proposal import Proposal
 
+
 def do_parsing():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         description='Script to export selective search proposals')
     parser.add_argument('--imagesDir', type=str, required=True, help='Folder containing input images')
+    parser.add_argument('--maxSide', type=int, required=False, default=300, help='Max side of image preprocess resize')
     parser.add_argument('--outputDirCrop', type=str, required=False, help='Output dir where to put images crops')
+    parser.add_argument('--quality', action="store_true", help='More quality (recall), but slower')
+    # Index format, single file
+    parser.add_argument('--outputIndexFile', type=str, required=False, help='Output index file with proposals')
+    # Object detection proposals format, one JSON for each image
     parser.add_argument('--outputDirJSON', type=str, required=False, help='Output dir where to put JSON files')
     # Over 1000 regions the crops seem to be very similar
     parser.add_argument('--maxRegions', type=int, required=False, default=1000,
                         help='Maximum number of regions to export')
     parser.add_argument('--minSize', type=int, required=False, default=32,
-                        help='Minimum image side dimension to save the file crop')
+                        help='Minimum image side (pixels) dimension to save the file crop')
     return parser.parse_args()
 
 
@@ -36,11 +40,14 @@ if __name__ == '__main__':
     print(args)
 
     # speed-up using multithreads
-    cv2.setUseOptimized(True);
-    cv2.setNumThreads(4);
+    cv2.setUseOptimized(True)
+    cv2.setNumThreads(4)
+
+    # create Selective Search Segmentation Object using default parameters
+    ss = cv2.ximgproc.segmentation.createSelectiveSearchSegmentation()
 
     #Files to analyze, ordered by name
-    imgFormats = ["jpg", "png"]
+    imgFormats = ["jpg", "png", "jpeg"]
     for imgFormat in imgFormats:
         files = sorted(glob.glob(args.imagesDir + "/*." + imgFormat), key=lambda s: s.lower())
         for imageFile in tqdm(files, unit="Image"):
@@ -53,28 +60,31 @@ if __name__ == '__main__':
             height = img.shape[0]
 
             # resize image, REALLY REALLY IMPORTANT FOR PERFORMANCES
-            newHeight = 200
-            newWidth = int(img.shape[1] * 200 / img.shape[0])
-            img_resized = cv2.resize(img, (newWidth, newHeight))
-
-            # create Selective Search Segmentation Object using default parameters
-            ss = cv2.ximgproc.segmentation.createSelectiveSearchSegmentation()
+            img_resized = resizeImage(img, width=width, height=height, maxSide=args.maxSide)
 
             # set input image on which we will run segmentation
             ss.setBaseImage(img_resized)
 
-            # Switch to fast but low recall Selective Search method
-            #ss.switchToSelectiveSearchFast()
-
-            # Switch to high recall but slow Selective Search method
-            ss.switchToSelectiveSearchQuality()
+            # Quality switch must executed for each image
+            if args.quality:
+                # Switch to high recall but slow Selective Search method
+                ss.switchToSelectiveSearchQuality()
+            else:
+                # Switch to fast but low recall Selective Search method
+                ss.switchToSelectiveSearchFast()
 
             # run selective search segmentation on input image
             regions = ss.process()
             print('Total Number of Region Proposals: {}'.format(len(regions)))
 
+            # FIXME: Permit fast Vs slow selection
+
+            # TODO: Manage new outputs format, probably they are the same as before (array of cv2 rects as numpy array)
+
+            # TODO: Export crops in our index format without doing them
+
             # region x, y, w, h
-            img_lbl, regions = ss.selective_search(img, scale=500, sigma=0.9, min_size=10)
+            #img_lbl, regions = ss.selective_search(img, scale=500, sigma=0.9, min_size=10)
 
             # Proposals export in JSON for our object detection training pipeline
             if args.outputDirJSON is not None:
