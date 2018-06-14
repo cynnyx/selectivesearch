@@ -177,10 +177,10 @@ if __name__ == '__main__':
                         heightR = float(h) / float(resized_height)
 
                         # Retrieve absolute positions on the original image
-                        x_original = int(x * width / resized_width)
-                        y_original = int(y * height / resized_height)
-                        w_original = int(w * width / resized_width)
-                        h_original = int(h * height / resized_height)
+                        x_original = int(round(x * width / resized_width))
+                        y_original = int(round(y * height / resized_height))
+                        w_original = int(round(w * width / resized_width))
+                        h_original = int(round(h * height / resized_height))
 
                         this_rect_dict_rel = dict()
                         this_rect_dict_rel["x_rel"] = XMinR
