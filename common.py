@@ -3,6 +3,7 @@ import sys
 
 import cv2
 import skimage.io
+import numpy as np
 from tqdm import tqdm
 
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), ".."))
