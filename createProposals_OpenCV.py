@@ -6,7 +6,6 @@ import sys
 import os
 
 from tqdm import tqdm
-import skimage.io
 
 from common import ImageProposals, resizeImage
 
@@ -154,8 +153,13 @@ if __name__ == '__main__':
                     ss.switchToSelectiveSearchFast()
 
                 # run selective search segmentation on input image
-                regions = ss.process()
-                print('Total Number of Region Proposals: {}'.format(len(regions)))
+                try:
+                    regions = ss.process()
+                    print('Total Number of Region Proposals: {}'.format(len(regions)))
+                except cv2.error as e:
+                    print(e)
+                    print("Error processing image " + imageFile + ", skipping")
+                    continue
 
                 rects_dict_rel = []
                 rects_dict_abs = []
